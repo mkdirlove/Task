@@ -1,4 +1,5 @@
 import sys
+import csv
 import sqlite3
 from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QPushButton, QLineEdit, QVBoxLayout, QWidget, QFileDialog, QMessageBox, QInputDialog, QTextEdit, QListWidget
 
@@ -33,6 +34,8 @@ class AppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
+        self.selected_record = None  # Add this line
+
         self.conn = sqlite3.connect("record_management.db")
         self.cursor = self.conn.cursor()
 
@@ -44,7 +47,7 @@ class AppWindow(QMainWindow):
         self.current_user = None
 
         self.setWindowTitle("Record Management System")
-        self.setGeometry(100, 100, 800, 600)
+        self.setGeometry(100, 100, 400, 400)
 
         self.login_layout = QVBoxLayout()
         self.login_input = QLineEdit()
@@ -64,6 +67,22 @@ class AppWindow(QMainWindow):
         self.name_input = QLineEdit()
         self.contact_input = QLineEdit()
 
+    def create_clear_button(self):
+        button = QPushButton("Clear Fields")
+        button.clicked.connect(self.clear_input_fields)
+        return button
+
+    def create_delete_button(self):
+        button = QPushButton("Delete Record")
+        button.clicked.connect(self.delete_selected_record)
+        return button
+
+    def delete_selected_record(self):
+        selected_item = self.records_list.currentItem()
+        if selected_item:
+            index = self.records_list.row(selected_item)
+            self.delete_record(index)
+
     def create_tables(self):
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS users (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,6 +97,37 @@ class AppWindow(QMainWindow):
                             picture_path TEXT,
                             contact_number TEXT)''')
         self.conn.commit()
+
+    def create_delete_button(self):
+        button = QPushButton("Delete Record")
+        button.clicked.connect(self.delete_selected_record)
+        return button
+
+    def delete_selected_record(self):
+        selected_item = self.records_list.currentItem()
+        if selected_item:
+            index = self.records_list.row(selected_item)
+            self.delete_record(index)
+
+    def create_update_button(self):
+        button = QPushButton("Update Record")
+        button.clicked.connect(self.update_selected_record)
+        return button
+
+    def update_selected_record(self):
+        selected_item = self.records_list.currentItem()
+        if selected_item:
+            index = self.records_list.row(selected_item)
+            self.update_record(index)
+
+    def delete_record(self, index):
+        record = self.record_manager.records[index]
+        self.cursor.execute("DELETE FROM records WHERE id = ?", (record.id,))
+        self.conn.commit()
+        self.record_manager.records.pop(index)
+        self.update_records_text()
+        self.update_records_list()
+        self.clear_input_fields()
 
     def load_users(self):
         self.cursor.execute("SELECT * FROM users")
@@ -141,12 +191,74 @@ class AppWindow(QMainWindow):
         admin_layout.addLayout(self.create_input_fields())
         admin_layout.addWidget(self.create_picture_button())
         admin_layout.addWidget(self.create_register_button())
+        admin_layout.addWidget(self.create_delete_button())
+        admin_layout.addWidget(self.create_update_button())
+        admin_layout.addWidget(self.create_export_button())
         admin_layout.addWidget(self.create_report_button())
+        admin_layout.addWidget(self.create_view_all_button())
         admin_layout.addWidget(self.create_records_text())
         admin_layout.addWidget(self.create_records_list())
         admin_container = QWidget()
         admin_container.setLayout(admin_layout)
         self.setCentralWidget(admin_container)
+
+    def create_register_button(self):
+        self.register_button = QPushButton("Register")
+        self.register_button.clicked.connect(self.register_record)  # Fixed this line
+        return self.register_button
+
+    def register_record(self):
+        id_value = self.id_input.text()
+        name = self.name_input.text()
+        contact_number = self.contact_input.text()
+
+        if id_value and name and self.picture_path:
+            record = Record(None, name, self.picture_path, contact_number)
+            self.cursor.execute("INSERT INTO records (user_id, name, picture_path, contact_number) VALUES (?, ?, ?, ?)",
+                                (self.current_user.id, record.name, record.picture_path, record.contact_number))
+            self.conn.commit()
+            record.id = self.cursor.lastrowid
+            self.record_manager.add_record(record)
+            self.update_records_text()
+            self.update_records_list()
+            self.clear_input_fields()
+
+    def create_view_all_button(self):
+        button = QPushButton("View All Records")
+        button.clicked.connect(self.view_all_records)
+        return button
+
+    def view_all_records(self):
+        self.cursor.execute("SELECT * FROM records")
+        all_records = self.cursor.fetchall()
+
+        report = "All Records:\n\n"
+        for record in all_records:
+            report += f"ID: {record[0]}\n"
+            report += f"Name: {record[2]}\n"
+            report += f"Contact Number: {record[4]}\n"
+            report += f"Picture Path: {record[3]}\n\n"
+
+        self.records_text.setPlainText(report)
+
+    def create_export_button(self):
+        button = QPushButton("Export to CSV")
+        button.clicked.connect(self.export_to_csv)
+        return button
+
+    def create_clear_button(self):
+        button = QPushButton("Clear Fields")
+        button.clicked.connect(self.clear_input_fields)
+        return button
+
+    def clear_input_fields(self):
+        self.id_input.clear()
+        self.name_input.clear()
+        self.contact_input.clear()
+        self.picture_path = ""
+        self.register_button.setText("Register")
+        self.register_button.clicked.disconnect()
+        self.register_button.clicked.connect(self.register_record)
 
     def create_user_widgets(self):
         user_layout = QVBoxLayout()
@@ -191,6 +303,11 @@ class AppWindow(QMainWindow):
         self.report_button.clicked.connect(self.generate_report)
         return self.report_button
 
+    def create_export_button(self):
+        button = QPushButton("Export to CSV")
+        button.clicked.connect(self.export_to_csv)
+        return button
+
     def create_records_text(self):
         self.records_text = QTextEdit()
         self.records_text.setReadOnly(True)
@@ -199,52 +316,46 @@ class AppWindow(QMainWindow):
     def create_records_list(self):
         self.records_list = QListWidget()
         self.records_list.itemClicked.connect(self.edit_selected_record)
+        self.view_all_records()  # Call the function to fetch and populate records
+        self.populate_records_list()  # Populate the QListWidget
         return self.records_list
+
+    def populate_records_list(self):
+        self.cursor.execute("SELECT * FROM records")
+        all_records = self.cursor.fetchall()
+
+        for record in all_records:
+            self.record_manager.add_record(Record(record[0], record[2], record[3], record[4]))
+            self.records_list.addItem(str(record[0]) + ": " + record[2])
 
     def edit_selected_record(self, item):
         index = self.records_list.row(item)
-        record = self.record_manager.records[index]
-        self.id_input.setText(str(record.id))
-        self.name_input.setText(record.name)
-        self.contact_input.setText(record.contact_number)
-        self.picture_path = record.picture_path
-        self.update_input_fields(record.id, record.name, record.picture_path, record.contact_number)
+        self.selected_record = self.record_manager.records[index]  # Store the selected record
+        self.id_input.setText(str(self.selected_record.id))
+        self.name_input.setText(self.selected_record.name)
+        self.contact_input.setText(self.selected_record.contact_number)
+        self.picture_path = self.selected_record.picture_path
+        self.update_input_fields(self.selected_record.id, self.selected_record.name, self.selected_record.picture_path, self.selected_record.contact_number)
         self.register_button.setText("Update")
         self.register_button.clicked.disconnect()
-        self.register_button.clicked.connect(lambda: self.update_record(index))
+        self.register_button.clicked.connect(self.update_selected_record)
 
-    def register_record(self):
-        id_value = self.id_input.text()
-        name = self.name_input.text()
-        contact_number = self.contact_input.text()
+    def update_selected_record(self):
+        if self.selected_record is not None:
+            id_value = self.id_input.text()
+            name = self.name_input.text()
+            contact_number = self.contact_input.text()
 
-        if id_value and name and self.picture_path:
-            record = Record(None, name, self.picture_path, contact_number)
-            self.cursor.execute("INSERT INTO records (user_id, name, picture_path, contact_number) VALUES (?, ?, ?, ?)",
-                                (self.current_user.id, record.name, record.picture_path, record.contact_number))
-            self.conn.commit()
-            record.id = self.cursor.lastrowid
-            self.record_manager.add_record(record)
-            self.update_records_text()
-            self.update_records_list()
-            self.clear_input_fields()
-
-    def update_record(self, index):
-        id_value = self.id_input.text()
-        name = self.name_input.text()
-        contact_number = self.contact_input.text()
-
-        if id_value and name and self.picture_path:
-            record = self.record_manager.records[index]
-            self.cursor.execute("UPDATE records SET name = ?, picture_path = ?, contact_number = ? WHERE id = ?",
-                                (name, self.picture_path, contact_number, record.id))
-            self.conn.commit()
-            record.name = name
-            record.picture_path = self.picture_path
-            record.contact_number = contact_number
-            self.update_records_text()
-            self.update_records_list()
-            self.clear_input_fields()
+            if id_value and name and self.picture_path:
+                self.cursor.execute("UPDATE records SET name = ?, picture_path = ?, contact_number = ? WHERE id = ?",
+                                    (name, self.picture_path, contact_number, self.selected_record.id))
+                self.conn.commit()
+                self.selected_record.name = name
+                self.selected_record.picture_path = self.picture_path
+                self.selected_record.contact_number = contact_number
+                self.update_records_text()
+                self.update_records_list()
+                self.clear_input_fields()
 
     def generate_report(self):
         report = "Records Report:\n\n"
@@ -278,6 +389,19 @@ class AppWindow(QMainWindow):
         self.register_button.setText("Register")
         self.register_button.clicked.disconnect()
         self.register_button.clicked.connect(self.register_record)
+
+    def export_to_csv(self):
+        options = QFileDialog.Options()
+        file_path, _ = QFileDialog.getSaveFileName(self, "Export to CSV", "", "CSV Files (*.csv)", options=options)
+
+        if file_path:
+            with open(file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                csv_writer = csv.writer(csvfile)
+                csv_writer.writerow(["ID", "Name", "Contact Number", "Picture Path"])
+                for record in self.record_manager.records:
+                    csv_writer.writerow([record.id, record.name, record.contact_number, record.picture_path])
+
+            QMessageBox.information(self, "Export Successful", "Records exported to CSV file.")
 
 def main():
     app = QApplication(sys.argv)
